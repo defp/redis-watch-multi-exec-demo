@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -30,8 +31,7 @@ func runTx(key string, id int) func(tx *redis.Tx) error {
 		}
 
 		if n == 0 {
-			fmt.Println(id, "票没了")
-			return nil
+			return errors.New("票没了")
 		}
 
 		// actual opperation (local in optimistic lock)
@@ -62,6 +62,11 @@ func getTicket(client *redis.Client, key string) {
 				if err == nil {
 					fmt.Println(id, "成功")
 					return
+				} else if err.Error() == "票没了" {
+					fmt.Println(id, "票没了")
+					return
+				} else {
+					fmt.Println(err, "retry")
 				}
 			}
 		}(i)
