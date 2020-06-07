@@ -22,6 +22,32 @@ func main() {
 	getTicket(client, key)
 }
 
+func runTx(key string, id int) func(tx *redis.Tx) error {
+	txf := func(tx *redis.Tx) error {
+		n, err := tx.Get(key).Int()
+		if err != nil && err != redis.Nil {
+			return err
+		}
+
+		if n == 0 {
+			fmt.Println(id, "票没了")
+			return nil
+		}
+
+		// actual opperation (local in optimistic lock)
+		n = n - 1
+
+		// runs only if the watched keys remain unchanged
+		_, err = tx.TxPipelined(func(pipe redis.Pipeliner) error {
+			// pipe handles the error case
+			pipe.Set(key, n, 0)
+			return nil
+		})
+		return err
+	}
+	return txf
+}
+
 func getTicket(client *redis.Client, key string) {
 	routineCount := 8
 	var wg sync.WaitGroup
@@ -31,31 +57,8 @@ func getTicket(client *redis.Client, key string) {
 		go func(id int) {
 			defer wg.Done()
 
-			txf := func(tx *redis.Tx) error {
-				n, err := tx.Get(key).Int()
-				if err != nil && err != redis.Nil {
-					return err
-				}
-
-				if n == 0 {
-					fmt.Println(id, "票没了")
-					return nil
-				}
-
-				// actual opperation (local in optimistic lock)
-				n = n - 1
-
-				// runs only if the watched keys remain unchanged
-				_, err = tx.TxPipelined(func(pipe redis.Pipeliner) error {
-					// pipe handles the error case
-					pipe.Set(key, n, 0)
-					return nil
-				})
-				return err
-			}
-
 			for {
-				err := client.Watch(txf, key)
+				err := client.Watch(runTx(key, id), key)
 				if err == nil {
 					fmt.Println(id, "成功")
 					return
